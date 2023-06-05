@@ -1,0 +1,12 @@
+kind: ConfigMap
+apiVersion: v1
+metadata:
+  name: {{IMAGE_NAME}}
+  namespace: {{NAMESPACE}}
+data:
+  configs.yaml: |-
+    spring:
+      datasource:
+        url: jdbc:postgresql://10.91.110.5:5432/ngfs
+        username: prf_001_SHORT_NAME
+        password: prf_001_SHORT_NAME

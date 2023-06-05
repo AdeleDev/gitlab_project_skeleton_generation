@@ -1,0 +1,22 @@
+apiVersion: extensions/v1beta1
+kind: Ingress
+metadata:
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /$2
+    nginx.ingress.kubernetes.io/proxy-connect-timeout: "65"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "65"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "65"
+  name: {{IMAGE_NAME}}-nossl
+  namespace: {{NAMESPACE}}
+spec:
+  rules:
+    - host: ng-fs-nossl.caas-{{CLUSTER_NAME}}.telekom.de
+      http:
+        paths:
+          - backend:
+              serviceName: {{IMAGE_NAME}}
+              servicePort: 8080
+            path: /{{ENV}}(/|$)(ng-fs-api/SERVICE_NAME/v{{API_VERSION}}/.*)
+  tls:
+    - hosts:
+        - ng-fs-nossl.caas-{{CLUSTER_NAME}}.telekom.de

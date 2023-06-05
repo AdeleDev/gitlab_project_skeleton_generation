@@ -1,0 +1,260 @@
+stages:
+  - create_new_service_group
+  - generate_service_repo
+  - generate_config_repo
+  - generate_api_repo
+  - production_templates
+  - frontend_repositories
+
+.template:
+  before_script:
+    - echo "StrictHostKeyChecking no" >> /etc/ssh/ssh_config
+    - git config --global user.email "$GITLAB_USER_EMAIL"
+    - git config --global user.name "$GITLAB_USER_NAME"
+    - git config --global http.sslverify "false"
+    - pwd
+    - cd ..
+    - rm -rf new-project
+    - mkdir new-project
+    - cd new-project
+    - pwd
+  tags:
+    - run01_docker
+  image: gradle:jdk13
+  variables:
+    PRIVATE_TOKEN: 2sqHVNGZc5h69vns21X2
+
+
+new_group:
+  extends: .template
+  stage: create_new_service_group
+  when: always
+  allow_failure: false
+  script:
+    - if [ -z "$NAME" ]; then echo "set variable "NAME ex. People Service" before running pipeline!"; exit 1 ; fi
+    - if [ -z "$SHORT_NAME" ]; then echo "variable SHORT_NAME not set, you need change it manually in generated repo"; fi
+    - echo "Generate group for service"
+    - repoPath=$(echo "$NAME" | sed s'/[A-Z]/-\l&/2g' | sed 's/.*/\l&/' | tr -d [:blank:])
+    - NAME_CURL=$(echo "$NAME" | sed s'/ /%20/g')
+    - curl -v --request POST --header "Private-Token:$PRIVATE_TOKEN" "https://gitlab.devops.telekom.de/api/v4/groups?name=${NAME_CURL}&path=${repoPath}&parent_id=12712&visibility=private"
+
+
+service_repo:
+  extends: .template
+  stage: generate_service_repo
+  when: on_success
+  script:
+    - export NAME_LOW="$(echo "${NAME}" | tr -d [:blank:] | tr A-Z a-z)"
+
+    - echo "Generate service repo"
+    - git init
+    - echo "${NAME} service" > README.md
+    - cp /builds/fsp/ng-fs/tools/project-skeleton-generation/configuration/service/.gitlab-ci-serv.yml ./.gitlab-ci.yml
+    - cp /builds/fsp/ng-fs/tools/project-skeleton-generation/configuration/service/.gitignore ./.gitignore
+    - cp /builds/fsp/ng-fs/tools/project-skeleton-generation/configuration/service/.dockerignore ./.dockerignore
+    - cp /builds/fsp/ng-fs/tools/project-skeleton-generation/configuration/service/Dockerfile ./Dockerfile
+    - export NAME_FROM_LOW_LETTER="$(echo "${NAME}" | tr -d [:blank:] |  sed 's/.*/\l&/')"
+    - echo "Update gitlab-ci.yml info - set image name and sonar key"
+    - sed -i "s/SERVICE_IMAGE_NAME/$NAME_LOW-service-image/g" .gitlab-ci.yml
+    - sed -i "s/SONAR_NAME/$NAME/g" .gitlab-ci.yml
+    - sed -i "s/INGRESS_NAME_CHANGE/$NAME_FROM_LOW_LETTER/g" .gitlab-ci.yml
+    - sed -i "s/SHORT_NAME/$SHORT_NAME/g" .gitlab-ci.yml
+    - cp /builds/fsp/ng-fs/tools/project-skeleton-generation/configuration/service/service.yaml ./service.yaml
+    - cp /builds/fsp/ng-fs/tools/project-skeleton-generation/configuration/service/deployment.yaml ./deployment.yaml
+    - cp /builds/fsp/ng-fs/tools/project-skeleton-generation/configuration/service/ingress.yaml ./ingress.yaml
+    - cp /builds/fsp/ng-fs/tools/project-skeleton-generation/configuration/service/ingress-nossl.yaml ./ingress-nossl.yaml
+    - cp /builds/fsp/ng-fs/tools/project-skeleton-generation/configuration/service/servicemonitor.yaml ./servicemonitor.yaml
+    - cp /builds/fsp/ng-fs/tools/project-skeleton-generation/configuration/service/app-config-dev.yaml ./app-config-dev.yaml
+    - cp /builds/fsp/ng-fs/tools/project-skeleton-generation/configuration/service/app-config-prf.yaml ./app-config-prf.yaml
+    - cp /builds/fsp/ng-fs/tools/project-skeleton-generation/configuration/service/app-config-sit.yaml ./app-config-sit.yaml
+    - sed -i "s/SHORT_NAME/$SHORT_NAME/g" ./app-config-dev.yaml
+    - sed -i "s/SHORT_NAME/$SHORT_NAME/g" ./app-config-prf.yaml
+    - sed -i "s/SHORT_NAME/$SHORT_NAME/g" ./app-config-sit.yaml
+    - cp /builds/fsp/ng-fs/tools/project-skeleton-generation/configuration/service/build.gradle ./build.gradle
+    - cp /builds/fsp/ng-fs/tools/project-skeleton-generation/configuration/service/gradle.properties ./gradle.properties
+    - ls .
+    - echo "Update ingress.yaml and ingress-nossl.yaml path info"
+    - sed -i "s/SERVICE_NAME/$NAME_FROM_LOW_LETTER/g" ingress.yaml
+    - sed -i "s/SERVICE_NAME/$NAME_FROM_LOW_LETTER/g" ingress-nossl.yaml
+
+
+    - echo "Update buid.gradle with name of service"
+    - sed -i "s/servicename/$NAME_LOW/g" build.gradle
+
+    - echo "Generate main part structure"
+    - export NAME_JAVA="$(echo "${NAME}" | tr -d [:blank:])"
+    - mkdir -p ./src/main/java/de/telekom/ngfs/${NAME_LOW}
+    - export PATH_TO_DIR=$(echo "./src/main/java/de/telekom/ngfs/${NAME_LOW}")
+    - cp /builds/fsp/ng-fs/tools/project-skeleton-generation/servicestructure/main/StartApp.java $PATH_TO_DIR/${NAME_JAVA}Application.java
+    - cp -r /builds/fsp/ng-fs/tools/project-skeleton-generation/servicestructure/main/configuration $PATH_TO_DIR/configuration
+    - mkdir -p $PATH_TO_DIR/entity
+    - cp /builds/fsp/ng-fs/tools/project-skeleton-generation/servicestructure/main/BaseEntity.java $PATH_TO_DIR/entity/BaseEntity.java
+    - mkdir -p $PATH_TO_DIR/api/handler
+    - cp /builds/fsp/ng-fs/tools/project-skeleton-generation/servicestructure/main/ExceptionHandler.java $PATH_TO_DIR/api/handler/ExceptionHandler.java
+    - cp /builds/fsp/ng-fs/tools/project-skeleton-generation/servicestructure/main/ProblemDefinition.java $PATH_TO_DIR/api/handler/ProblemDefinition.java
+    - cp /builds/fsp/ng-fs/tools/project-skeleton-generation/servicestructure/main/MockApi.java $PATH_TO_DIR/api/MockApi.java
+    - mkdir -p $PATH_TO_DIR/service
+    - cp /builds/fsp/ng-fs/tools/project-skeleton-generation/servicestructure/main/ServiceImpl.java $PATH_TO_DIR/service/${NAME_JAVA}ServiceImpl.java
+    - mkdir -p $PATH_TO_DIR/service/api
+    - cp /builds/fsp/ng-fs/tools/project-skeleton-generation/servicestructure/main/ServiceInterface.java $PATH_TO_DIR/service/api/${NAME_JAVA}Service.java
+    - cp -r /builds/fsp/ng-fs/tools/project-skeleton-generation/servicestructure/main/resources ./src/main/resources
+    - mkdir -p $PATH_TO_DIR/utils
+    - cp /builds/fsp/ng-fs/tools/project-skeleton-generation/servicestructure/main/SchemaExportWrapper.java $PATH_TO_DIR/utils/SchemaExportWrapper.java
+    - cp /builds/fsp/ng-fs/tools/project-skeleton-generation/servicestructure/main/PostgresSQLWithTZDialect.java $PATH_TO_DIR/utils/PostgresSQLWithTZDialect.java
+    - mkdir -p ./src/main/resources/api
+    - cp -r /builds/fsp/ng-fs/tools/project-skeleton-generation/apistructure/api/service_v1.0.yaml ./src/main/resources/api/service_v1.0.yaml
+    - mkdir -p ./src/main/resources/db/
+    - mkdir -p ./src/main/resources/db/autogen
+    - cp -r /builds/fsp/ng-fs/tools/project-skeleton-generation/servicestructure/main/V1__creation_script.sql ./src/main/resources/db/autogen/V1__creation_script.sql
+    - mkdir -p ./src/main/resources/db/migration
+    - cp -r /builds/fsp/ng-fs/tools/project-skeleton-generation/servicestructure/main/V1__creation_script.sql ./src/main/resources/db/migration/V1__creation_script.sql
+    - mkdir -p ./flyway
+    - cp  /builds/fsp/ng-fs/tools/project-skeleton-generation/servicestructure/Dockerfile ./flyway/Dockerfile
+
+    - ls .
+    - sed -i "s/servicename/$NAME_LOW/g" $PATH_TO_DIR/${NAME_JAVA}Application.java
+    - sed -i "s/SERVICE_NAME/${NAME_JAVA}Application/g" $PATH_TO_DIR/${NAME_JAVA}Application.java
+    - sed -i "s/servicename/$NAME_LOW/g" $PATH_TO_DIR/configuration/HibernateValidationProviderResolver.java
+    - sed -i "s/servicename/$NAME_LOW/g" $PATH_TO_DIR/configuration/JacksonConfiguration.java
+    - sed -i "s/servicename/$NAME_LOW/g" $PATH_TO_DIR/configuration/ValidationConfiguration.java
+    - sed -i "s/servicename/$NAME_LOW/g" $PATH_TO_DIR/configuration/RsServerConfiguration.java
+    - sed -i "s/servicename/$NAME_FROM_LOW_LETTER/g" ./src/main/resources/application.yaml
+    - sed -i "s/servicename/$NAME_LOW/g" $PATH_TO_DIR/entity/BaseEntity.java
+    - sed -i "s/servicename/$NAME_LOW/g" $PATH_TO_DIR/api/handler/ExceptionHandler.java
+    - sed -i "s/servicename/$NAME_LOW/g" $PATH_TO_DIR/api/handler/ProblemDefinition.java
+    - sed -i "s/servicename/$NAME_LOW/g" $PATH_TO_DIR/api/MockApi.java
+    - sed -i "s/SERVICE_NAME/$NAME_JAVA/g" $PATH_TO_DIR/api/MockApi.java
+    - sed -i "s/servicename/$NAME_LOW/g" $PATH_TO_DIR/service/api/${NAME_JAVA}Service.java
+    - sed -i "s/SERVICE_NAME/$NAME_JAVA/g" $PATH_TO_DIR/service/api/${NAME_JAVA}Service.java
+    - sed -i "s/servicename/$NAME_LOW/g" $PATH_TO_DIR/service/${NAME_JAVA}ServiceImpl.java
+    - sed -i "s/SERVICE_NAME/$NAME_JAVA/g" $PATH_TO_DIR/service/${NAME_JAVA}ServiceImpl.java
+    - sed -i "s/servicename/$NAME_LOW/g" $PATH_TO_DIR/utils/SchemaExportWrapper.java
+    - sed -i "s/servicename/$NAME_LOW/g" $PATH_TO_DIR/utils/PostgresSQLWithTZDialect.java
+    - sed -i "s/SERVICE_IMAGE_NAME/$NAME_LOW-service-image/g" ./src/main/resources/bootstrap.yaml
+    - sed -i "s/SERVICE_NAME/$NAME_JAVA/g" ./src/main/resources/bootstrap.yaml
+    - repoPath=$(echo "$NAME" | sed s'/[A-Z]/-\l&/2g' | sed 's/.*/\l&/' | tr -d [:blank:])
+    - sed -i "s/applicationname/$repoPath/g" ./src/main/resources/application.yaml
+
+    - echo "Generate unit tests structure"
+    - mkdir -p ./src/test/java/de/telekom/ngfs/${NAME_LOW}
+    - export PATH_TO_DIR=$(echo "./src/test/java/de/telekom/ngfs/${NAME_LOW}")
+    - cp /builds/fsp/ng-fs/tools/project-skeleton-generation/servicestructure/unit/TestTemplate.java $PATH_TO_DIR/${NAME_JAVA}ApplicationTest.java
+    - mkdir -p $PATH_TO_DIR/service
+    - cp /builds/fsp/ng-fs/tools/project-skeleton-generation/servicestructure/integration/tests/TestTemplate.java $PATH_TO_DIR/service/${NAME_JAVA}ServiceTest.java
+    - sed -i "s/servicename/$NAME_LOW/g" $PATH_TO_DIR/${NAME_JAVA}ApplicationTest.java
+    - sed -i "s/SERVICE_NAME/${NAME_JAVA}ApplicationTest/g" $PATH_TO_DIR/${NAME_JAVA}ApplicationTest.java
+    - sed -i "s/servicename.tests/${NAME_LOW}.service/g" $PATH_TO_DIR/service/${NAME_JAVA}ServiceTest.java
+    - sed -i "s/SERVICE_NAME/${NAME_JAVA}ServiceTest/g" $PATH_TO_DIR/service/${NAME_JAVA}ServiceTest.java
+
+    - echo "Generate integration tests structure"
+    - mkdir -p -- "./src/integration-test/resources"
+    - cp  /builds/fsp/ng-fs/tools/project-skeleton-generation/servicestructure/integration/application.yaml ./src/integration-test/resources/application.yaml
+    - mkdir -p ./src/integration-test/java/de/telekom/ngfs/${NAME_LOW}
+    - export PATH_TO_DIR=$(echo "./src/integration-test/java/de/telekom/ngfs/${NAME_LOW}")
+    - cp /builds/fsp/ng-fs/tools/project-skeleton-generation/servicestructure/integration/HelloTest.java $PATH_TO_DIR/HelloTest.java
+    - cp -r /builds/fsp/ng-fs/tools/project-skeleton-generation/servicestructure/integration/configuration $PATH_TO_DIR/configuration
+    - cp -r /builds/fsp/ng-fs/tools/project-skeleton-generation/servicestructure/integration/extension $PATH_TO_DIR/extension
+    - mkdir -p $PATH_TO_DIR/tests
+    - cp  /builds/fsp/ng-fs/tools/project-skeleton-generation/servicestructure/integration/tests/TestTemplate.java $PATH_TO_DIR/tests/PositiveTests.java
+    - cp  /builds/fsp/ng-fs/tools/project-skeleton-generation/servicestructure/integration/tests/TestTemplate.java $PATH_TO_DIR/tests/NegativeTests.java
+    - sed -i "s/servicename/$NAME_LOW/g" $PATH_TO_DIR/HelloTest.java
+    - sed -i "s/servicename/$NAME_LOW/g" $PATH_TO_DIR/tests/PositiveTests.java
+    - sed -i "s/SERVICE_NAME/PositiveTests/g" $PATH_TO_DIR/tests/PositiveTests.java
+    - sed -i "s/servicename/$NAME_LOW/g" $PATH_TO_DIR/tests/NegativeTests.java
+    - sed -i "s/SERVICE_NAME/NegativeTests/g" $PATH_TO_DIR/tests/NegativeTests.java
+    - sed -i "s/servicename/$NAME_LOW/g" $PATH_TO_DIR/extension/annotation/MockServer.java
+    - sed -i "s/servicename/$NAME_LOW/g" $PATH_TO_DIR/extension/annotation/RestTestClient.java
+    - sed -i "s/servicename/$NAME_LOW/g" $PATH_TO_DIR/extension/MockServerExtension.java
+    - sed -i "s/servicename/$NAME_LOW/g" $PATH_TO_DIR/extension/RestAssuredClientExtension.java
+    - sed -i "s/servicename/$NAME_LOW/g" $PATH_TO_DIR/configuration/TestProperties.java
+    - sed -i "s/servicename/$NAME_LOW/g" $PATH_TO_DIR/extension/RestAssuredClientExtension.java
+    - sed -i "s/servicename/$NAME_FROM_LOW_LETTER/g" ./src/integration-test/resources/application.yaml
+    - sed -i "s/applicationname/$repoPath/g" ./src/integration-test/resources/application.yaml
+    - sed -i "s/SHORT_NAME/$SHORT_NAME/g" ./src/integration-test/resources/application.yaml
+
+    - echo "Generate performance tests structure"
+    - mkdir -p -- "./src/gatling/simulations/$NAME_LOW"
+    - cp  /builds/fsp/ng-fs/tools/project-skeleton-generation/servicestructure/RecordedSimulation.scala ./src/gatling/simulations/$NAME_LOW/RecordedSimulation.scala
+    - sed -i "s/servicename/$NAME_LOW/g" ./src/gatling/simulations/$NAME_LOW/RecordedSimulation.scala
+
+    - git add .
+    - git commit -m "Inizialization service repo"
+    - repoPath=$(echo "$NAME" | sed s'/[A-Z]/-\l&/2g' | sed 's/.*/\l&/' | tr -d [:blank:])
+    - git push -o ci.skip --set-upstream https://oauth2:$PRIVATE_TOKEN@gitlab.devops.telekom.de/fsp/ng-fs/services/${repoPath}/${repoPath}-service.git master
+
+    - echo "Get project service id to update git path"
+    - id=$(curl -XGET --header "Private-Token:$PRIVATE_TOKEN" "https://gitlab.devops.telekom.de/api/v4/projects?search="${repoPath}"-service" | sed s'/[,{}]/\n/g' | grep '^\"id\"\:' | cut -d ':' -f2 | head -1)
+    - echo "The repo-service is" $id
+    - echo "Name for git repo path is $repoPath"
+    - curl -v --header "Content-Type:application/json" --header "Private-Token:$PRIVATE_TOKEN" -X PUT --data '{"name":"'${NAME}'-service", "path":"'$repoPath'-service", "path_with_namespace":"fsp/ng-fs/'${repoPath}'/'$repoPath'-service", "ssh_url_to_repo":"gitlab@gitlab.devops.telekom.de:fsp/ng-fs/services/'${repoPath}'/'$repoPath'-service.git", "http_url_to_repo":"https://gitlab.devops.telekom.de/fsp/ng-fs/services/services/'${NAME}'/'$repoPath'-service.git", "web_url":"https://gitlab.devops.telekom.de/fsp/ng-fs/services/services/'${NAME}'/'$repoPath'-service", "readme_url":"https://gitlab.devops.telekom.de/fsp/ng-fs/services/services/'${NAME}'/'$repoPath'-service/-/blob/master/README.md" }' "https://gitlab.devops.telekom.de/api/v4/projects/$id"
+
+    - echo "Create develop branch for project"
+    - curl -v --request POST --header "Private-Token:$PRIVATE_TOKEN" "https://gitlab.devops.telekom.de/api/v4/projects/$id/repository/branches?branch=develop&ref=master"
+
+    - echo "Create environment variables for project"
+    - curl -v --request POST --header "Private-Token:$PRIVATE_TOKEN" "https://gitlab.devops.telekom.de/api/v4/projects/$id/variables" --form "key=MTR_TOKEN" --form "value=Z2AKMF798H5XG61OUD4ND6HLQYGNL2E7S7NTMNCS6NI78U4K33II3IKFUSFQMFKR"
+    - curl -v --request POST --header "Private-Token:$PRIVATE_TOKEN" "https://gitlab.devops.telekom.de/api/v4/projects/$id/variables" --form "key=MTR_USER" --form "value=ng-fs+diablo_robot"
+    - curl -v --request POST --header "Private-Token:$PRIVATE_TOKEN" "https://gitlab.devops.telekom.de/api/v4/projects/$id/variables" --form "key=PRIVATE_TOKEN" --form "value=GwKs71EuYNrycT89JUFS"
+    - curl -v --request POST --header "Private-Token:$PRIVATE_TOKEN" "https://gitlab.devops.telekom.de/api/v4/projects/$id/variables" --form "key=DOCKER_AUTH_CONFIG" --form "value={\"auths\":{\"mtr.external.otc.telekomcloud.com\":{\"auth\":\"bmctZnMrZGlhYmxvX3JvYm90OloyQUtNRjc5OEg1WEc2MU9VRDRORDZITFFZR05MMkU3UzdOVE1OQ1M2Tkk3OFU0SzMzSUkzSUtGVVNGUU1GS1I=\"}}}"
+    - curl -v --request POST --header "Private-Token:$PRIVATE_TOKEN" "https://gitlab.devops.telekom.de/api/v4/projects/$id/variables" --form "key=SSH_PRIVATE_KEY" --form "value=changeIt"
+
+api_repo:
+  extends: .template
+  stage: generate_api_repo
+  when: on_success
+  script:
+    - echo "Generate api repo"
+    - git init
+    - echo "${NAME} service api" > README.md
+    - cp /builds/fsp/ng-fs/tools/project-skeleton-generation/configuration/.gitlab-ci-api.yml ./.gitlab-ci.yml
+    - cp -r /builds/fsp/ng-fs/tools/project-skeleton-generation/apistructure/api ./api
+    - cp -r /builds/fsp/ng-fs/tools/project-skeleton-generation/apistructure/img ./img
+    - ls .
+    - git add .
+    - git commit -m "Inizialization service api repo"
+    - repoPath=$(echo "$NAME" | sed s'/[A-Z]/-\l&/2g' | sed 's/.*/\l&/' | tr -d [:blank:])
+    - git push -o ci.skip --set-upstream https://oauth2:$PRIVATE_TOKEN@gitlab.devops.telekom.de/fsp/ng-fs/services/${repoPath}/${repoPath}-api.git master
+    - echo "Get project service id to update git path"
+    - id=$(curl -XGET --header "Private-Token:$PRIVATE_TOKEN" "https://gitlab.devops.telekom.de/api/v4/projects?search="${repoPath}"-api" | sed s'/[,{}]/\n/g' | grep '^\"id\"\:' | cut -d ':' -f2 | head -1)
+    - echo "The repo-service is" $id
+    - echo "Name for git repo path is $repoPath"
+    - curl -v --header "Content-Type:application/json" --header "Private-Token:$PRIVATE_TOKEN" -X PUT --data '{"name":"'${NAME}'-api", "path":"'$repoPath'-api", "path_with_namespace":"fsp/ng-fs/'${repoPath}'/'$repoPath'-api", "ssh_url_to_repo":"gitlab@gitlab.devops.telekom.de:fsp/ng-fs/services/'${repoPath}'/'$repoPath'-api.git", "http_url_to_repo":"https://gitlab.devops.telekom.de/fsp/ng-fs/services/services/'${NAME}'/'$repoPath'-api.git", "web_url":"https://gitlab.devops.telekom.de/fsp/ng-fs/services/services/'${NAME}'/'$repoPath'-api", "readme_url":"https://gitlab.devops.telekom.de/fsp/ng-fs/services/services/'${NAME}'/'$repoPath'-api/-/blob/master/README.md" }' "https://gitlab.devops.telekom.de/api/v4/projects/$id"
+
+    - echo "Create environment variables for project"
+    - curl -v --request POST --header "Private-Token:$PRIVATE_TOKEN" "https://gitlab.devops.telekom.de/api/v4/projects/$id/repository/branches?branch=develop&ref=master"
+    - curl -v --request POST --header "Private-Token:$PRIVATE_TOKEN" "https://gitlab.devops.telekom.de/api/v4/projects/$id/variables" --form "key=NEXUS_LOGIN" --form "value=sa_wbench_3"
+    - curl -v --request POST --header "Private-Token:$PRIVATE_TOKEN" "https://gitlab.devops.telekom.de/api/v4/projects/$id/variables" --form "key=NEXUS_PAS" --form "value=diablo_nexus"
+    - curl -v --request POST --header "Private-Token:$PRIVATE_TOKEN" "https://gitlab.devops.telekom.de/api/v4/projects/$id/variables" --form "key=PRIVATE_TOKEN" --form "value=GwKs71EuYNrycT89JUFS"
+
+frontend_repo:
+  extends: .template
+  stage: frontend_repositories
+  when: manual
+  script:
+    - echo "Generate frontend repo"
+    - git init
+    - echo "${NAME} service frontend repo" > README.md
+    - git add .
+    - git commit -m "Inizialization service frontend repo"
+    - repoPath=$(echo "$NAME" | sed s'/[A-Z]/-\l&/2g' | sed 's/.*/\l&/' | tr -d [:blank:])
+    - git push --set-upstream https://oauth2:$PRIVATE_TOKEN@gitlab.devops.telekom.de/fsp/ng-fs/services/${repoPath}/${repoPath}-frontend.git master
+
+    - echo "Get project service id to update git path"
+    - id=$(curl -XGET --header "Private-Token:$PRIVATE_TOKEN" "https://gitlab.devops.telekom.de/api/v4/projects?search="${repoPath}"-frontend" | sed s'/[,{}]/\n/g' | grep '^\"id\"\:' | cut -d ':' -f2 | head -1)
+    - echo "The repo-service is" $id
+    - echo "Name for git repo path is $repoPath"
+    - curl -v --header "Content-Type:application/json" --header "Private-Token:$PRIVATE_TOKEN" -X PUT --data '{"name":"'${NAME}'-frontend", "path":"'$repoPath'-frontend", "path_with_namespace":"fsp/ng-fs/'${repoPath}'/'$repoPath'-frontend", "ssh_url_to_repo":"gitlab@gitlab.devops.telekom.de:fsp/ng-fs/services/'${repoPath}'/'$repoPath'-frontend.git", "http_url_to_repo":"https://gitlab.devops.telekom.de/fsp/ng-fs/services/services/'${NAME}'/'$repoPath'-frontend.git", "web_url":"https://gitlab.devops.telekom.de/fsp/ng-fs/services/services/'${NAME}'/'$repoPath'-frontend", "readme_url":"https://gitlab.devops.telekom.de/fsp/ng-fs/services/services/'${NAME}'/'$repoPath'-frontend/-/blob/master/README.md" }' "https://gitlab.devops.telekom.de/api/v4/projects/$id"
+
+    - echo "Generate b4f repo"
+    - git init
+    - echo "${NAME} service b4f repo" > README.md
+    - git add .
+    - git commit -m "Inizialization service b4f repo"
+    - git push --set-upstream https://oauth2:$PRIVATE_TOKEN@gitlab.devops.telekom.de/fsp/ng-fs/services/${repoPath}/${repoPath}-b4f.git master
+
+    - echo "Get project service id to update git path"
+    - id=$(curl -XGET --header "Private-Token:$PRIVATE_TOKEN" "https://gitlab.devops.telekom.de/api/v4/projects?search="${repoPath}"-b4f" | sed s'/[,{}]/\n/g' | grep '^\"id\"\:' | cut -d ':' -f2 | head -1)
+    - echo "The repo-service is" $id
+    - repoPath=$(echo "$NAME" | sed s'/[A-Z]/-\l&/2g' | sed 's/.*/\l&/' | tr -d [:blank:])
+    - echo "Name for git repo path is $repoPath"
+    - curl -v --header "Content-Type:application/json" --header "Private-Token:$PRIVATE_TOKEN" -X PUT --data '{"name":"'${NAME}'-b4f", "path":"'$repoPath'-b4f", "path_with_namespace":"fsp/ng-fs/'${repoPath}'/'$repoPath'-b4f", "ssh_url_to_repo":"gitlab@gitlab.devops.telekom.de:fsp/ng-fs/services/'${repoPath}'/'$repoPath'-b4f.git", "http_url_to_repo":"https://gitlab.devops.telekom.de/fsp/ng-fs/services/services/'${NAME}'/'$repoPath'-b4f.git", "web_url":"https://gitlab.devops.telekom.de/fsp/ng-fs/services/services/'${NAME}'/'$repoPath'-b4f", "readme_url":"https://gitlab.devops.telekom.de/fsp/ng-fs/services/services/'${NAME}'/'$repoPath'-b4f/-/blob/master/README.md" }' "https://gitlab.devops.telekom.de/api/v4/projects/$id"

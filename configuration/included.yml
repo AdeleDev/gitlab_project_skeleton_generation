@@ -1,0 +1,10 @@
+.template:
+  before_script:
+    # get configuration files from the production branch repository
+    - 'curl --header "PRIVATE-TOKEN: ${PRIVATE_TOKEN}" "https://gitlab.devops.telekom.de/api/v4/projects/314/repository/files/deployment.yaml/raw?ref=${BRANCH}" -o "./deployment.yaml"'
+    - 'curl --header "PRIVATE-TOKEN: ${PRIVATE_TOKEN}" "https://gitlab.devops.telekom.de/api/v4/projects/314/repository/files/service.yaml/raw?ref=${BRANCH}" -o "./service.yaml"'
+    - 'curl --header "PRIVATE-TOKEN: ${PRIVATE_TOKEN}" "https://gitlab.devops.telekom.de/api/v4/projects/314/repository/files/ingress.yaml/raw?ref=${BRANCH}" -o "./ingress.yaml"'
+
+    - HOME=$(pwd)
+    - cat $(pwd)/deployment.yaml | sed -e "s!{{NAMESPACE}}!$NAMESPACE!g" -e "s!{{IMAGE_NAME}}!$IMAGE_NAME!g" -e "s!{{IMAGE_PATH}}!$IMAGE_PATH!g" -e "s!{{REPLICA}}!$REPLICA!g" -e "s!{{DOCKER_SECRET}}!$DOCKER_SECRET!g" | rancher kubectl apply -f -
+    - cat $(pwd)/service.yaml | sed -e "s!{{NAMESPACE}}!$NAMESPACE!g" -e "s!{{IMAGE_NAME}}!$IMAGE_NAME!g" | rancher kubectl apply -f -

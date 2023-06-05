@@ -1,0 +1,24 @@
+apiVersion: extensions/v1beta1
+kind: Ingress
+metadata:
+  annotations:
+    nginx.ingress.kubernetes.io/configuration-snippet: |-
+      ### Set allowed CN names, ex. "CN=(CN1|CN2|CN3)", to accept all certificates use "CN=(.*)"
+      if ($ssl_client_s_dn_legacy !~* "({{CN_NAMES}})" ){
+        return 401 https://certificate_not_authorized.info;
+      }
+    nginx.ingress.kubernetes.io/rewrite-target: /$2
+  name: {{IMAGE_NAME}}
+  namespace: {{NAMESPACE}}
+spec:
+  rules:
+    - host: ng-fs.caas-{{CLUSTER_NAME}}.telekom.de
+      http:
+        paths:
+          - backend:
+              serviceName: {{IMAGE_NAME}}
+              servicePort: 8080
+            path: /{{ENV}}(/|$)(ng-fs-api/SERVICE_NAME/v{{API_VERSION}}/.*)
+  tls:
+    - hosts:
+        - ng-fs.caas-{{CLUSTER_NAME}}.telekom.de

@@ -1,0 +1,28 @@
+apiVersion: v1
+kind: Service
+metadata:
+  annotations:
+    field.cattle.io/ipAddresses: "null"
+    field.cattle.io/targetDnsRecordIds: "null"
+    field.cattle.io/targetWorkloadIds: '["deployment:{{NAMESPACE}}:{{IMAGE_NAME}}"]'
+  labels:
+    app: {{IMAGE_NAME}}
+  name: {{IMAGE_NAME}}
+  namespace: {{NAMESPACE}}
+spec:
+  clusterIP: None
+  ports:
+    - name: {{IMAGE_NAME}}
+      # Set port that will be used to access to pod
+      port: 8080
+      protocol: TCP
+      # Set port that listen on the pod
+      targetPort: 8080
+    - name: metrics
+      port: 9000
+      protocol: TCP
+      targetPort: 9090
+  selector:
+    workloadID_{{NAMESPACE}}: "true"
+  sessionAffinity: None
+  type: ClusterIP
